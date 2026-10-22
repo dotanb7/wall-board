@@ -199,6 +199,17 @@
     transition: opacity 1s ease, visibility 0s linear 0s;
   }
   .slides { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+  .slide {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    transition: opacity 1.5s ease;
+  }
+  .slide.show { opacity: 1; }
+  .slide.fit-cover { object-fit: cover; }
+  .slide.fit-contain { object-fit: contain; }
   .corner {
     position: absolute;
     right: 2rem;
@@ -273,6 +284,9 @@
     var DEFAULT_EVENT_COLOR = '#9ca3af';
     var VIEW_CHECK_MS = 5000;
     var NIGHT_PEEK_MS = 30 * 1000;
+    var FADE_MS = 1500;
+    var PHOTO_LIST_MAX_AGE_MS = 30 * 60 * 1000;
+    var PHOTO_RETRY_MS = 5000;
 
     var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     var DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -744,6 +758,184 @@
       el.textContent = notes.join(' \u00b7 ');
     }
 
+    // ---------- Photos ----------
+    //
+    // Two <img> slots crossfade. The hidden slot preloads the next photo, so at most two images
+    // are ever decoded. Each photo becomes a blob URL that is revoked as soon as its slot is reused,
+    // which keeps memory flat over hours on the tablet.
+
+    // run counts start/stop cycles; callbacks from an earlier run see a different value and bail out.
+    var slides = { running: false, run: 0, ids: [], order: [], pos: 0, listedAt: 0, shown: -1,
+      nextReady: false, failures: 0, timer: null, slots: [] };
+
+    function isCurrentRun(run) { return slides.running && slides.run === run; }
+
+    function serverCall(api, params, fn, onOk, onErr) {
+      if (!isStatic) {
+        var run = google.script.run.withSuccessHandler(onOk)
+          .withFailureHandler(function (err) { onErr(err && err.message); });
+        run[fn].apply(run, [boot.key].concat(params.id ? [params.id] : []));
+        return;
+      }
+      var url = boot.api + '?api=' + api + '&k=' + encodeURIComponent(boot.key) +
+        (params.id ? '&id=' + encodeURIComponent(params.id) : '');
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', url);
+      xhr.timeout = 60000;
+      xhr.onload = function () {
+        var data = null;
+        try { data = JSON.parse(xhr.responseText); } catch (e) {}
+        if (xhr.status === 200 && data && !data.error) onOk(data);
+        else onErr(data && data.error ? data.error : 'HTTP ' + xhr.status);
+      };
+      xhr.onerror = function () { onErr(''); };
+      xhr.ontimeout = function () { onErr(''); };
+      xhr.send();
+    }
+
+    function slot(i) {
+      if (!slides.slots.length) {
+        for (var n = 0; n < 2; n++) {
+          var img = document.createElement('img');
+          img.className = 'slide';
+          img.alt = '';
+          $('slides').appendChild(img);
+          slides.slots.push({ img: img, url: null });
+        }
+      }
+      return slides.slots[i];
+    }
+
+    function releaseSlot(i) {
+      var s = slot(i);
+      s.img.className = 'slide';
+      s.img.onload = s.img.onerror = null;
+      s.img.removeAttribute('src');
+      if (s.url) URL.revokeObjectURL(s.url);
+      s.url = null;
+    }
+
+    function base64ToObjectUrl(base64, mime) {
+      var bin = window.atob(base64);
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return URL.createObjectURL(new Blob([bytes], { type: mime }));
+    }
+
+    function shuffle(list) {
+      var a = list.slice();
+      for (var i = a.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = a[i]; a[i] = a[j]; a[j] = t;
+      }
+      return a;
+    }
+
+    function nextPhotoId() {
+      if (slides.pos >= slides.order.length) {
+        slides.order = shuffle(slides.ids);
+        slides.pos = 0;
+      }
+      return slides.order[slides.pos++];
+    }
+
+    function withPhotoList(done) {
+      if (slides.ids.length && Date.now() - slides.listedAt < PHOTO_LIST_MAX_AGE_MS) return done();
+      serverCall('photos', {}, 'getPhotoList', function (data) {
+        slides.ids = data.ids || [];
+        slides.listedAt = Date.now();
+        slides.order = [];
+        slides.pos = 0;
+        done();
+      }, function () { done(); });
+    }
+
+    // Loads the next photo into the hidden slot; calls back when it is decoded and ready to show.
+    function preload(i, done) {
+      var run = slides.run;
+      withPhotoList(function () {
+        if (!isCurrentRun(run)) return;
+        if (!slides.ids.length) return done(false);
+        var id = nextPhotoId();
+        serverCall('photo', { id: id }, 'getPhoto', function (data) {
+          if (!isCurrentRun(run)) return;
+          releaseSlot(i);
+          var s = slot(i);
+          s.url = base64ToObjectUrl(data.base64, data.mime);
+          s.img.onload = function () {
+            s.img.onload = s.img.onerror = null;
+            s.img.className = 'slide ' + (s.img.naturalWidth >= s.img.naturalHeight ? 'fit-cover' : 'fit-contain');
+            done(true);
+          };
+          s.img.onerror = function () { releaseSlot(i); done(false); };
+          s.img.src = s.url;
+        }, function () { done(false); });
+      });
+    }
+
+    function preloadHidden() {
+      var run = slides.run;
+      var hidden = slides.shown === 0 ? 1 : 0;
+      slides.nextReady = false;
+      preload(hidden, function (ok) {
+        if (!isCurrentRun(run)) return;
+        if (ok) {
+          slides.failures = 0;
+          slides.nextReady = true;
+          if (slides.shown === -1) swapSlides();
+        } else {
+          slides.failures++;
+          slides.timer = setTimeout(preloadHidden, PHOTO_RETRY_MS * Math.min(slides.failures, 12));
+        }
+      });
+    }
+
+    function swapSlides() {
+      clearTimeout(slides.timer);
+      if (!slides.running) return;
+      if (!slides.nextReady) {
+        slides.timer = setTimeout(swapSlides, 2000); // Still loading; keep the current photo up.
+        return;
+      }
+      var hidden = slides.shown === 0 ? 1 : 0;
+      var old = slides.shown;
+      slot(hidden).img.className += ' show';
+      if (old !== -1) slot(old).img.className = slot(old).img.className.replace(/\s*\bshow\b/, '');
+      slides.shown = hidden;
+      slides.nextReady = false;
+      var run = slides.run;
+      // Once the fade finishes, free the old photo and start loading the next one into its slot.
+      setTimeout(function () {
+        if (!isCurrentRun(run)) return;
+        if (old !== -1) releaseSlot(old);
+        preloadHidden();
+      }, FADE_MS + 100);
+      slides.timer = setTimeout(swapSlides, (settings.photo_seconds || 30) * 1000);
+    }
+
+    function startSlideshow() {
+      if (slides.running) return;
+      slides.running = true;
+      slides.run++;
+      if (slides.slots.length) { releaseSlot(0); releaseSlot(1); }
+      slides.shown = -1;
+      slides.failures = 0;
+      preloadHidden();
+    }
+
+    function stopSlideshow() {
+      slides.running = false;
+      slides.run++;
+      clearTimeout(slides.timer);
+      var run = slides.run;
+      // Free both photos after the overlay has faded out.
+      setTimeout(function () {
+        if (slides.running || slides.run !== run) return;
+        if (slides.slots.length) { releaseSlot(0); releaseSlot(1); }
+        slides.shown = -1;
+      }, FADE_MS + 100);
+    }
+
     // ---------- View states ----------
     //
     // board: everything. slideshow: photo + small clock + temp. night: black, very dim clock.
@@ -781,6 +973,8 @@
       if (next === viewState) return;
       var cls = document.body.className.replace(/\bstate-\w+\b/g, '').replace(/\s+/g, ' ');
       document.body.className = (cls + ' state-' + next).replace(/^\s+/, '');
+      if (next === 'slideshow') startSlideshow();
+      else if (viewState === 'slideshow') stopSlideshow();
       viewState = next;
     }
 
