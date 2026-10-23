@@ -662,8 +662,9 @@
       return '<div class="event' + (e.allDay ? ' event-all-day' : '') +
         '" style="border-left-color:' + safeColor(e.color) + '">' +
         (e.allDay ? '' : '<span class="event-time">' + time + '</span>') +
-        '<span class="event-title">' + escapeHtml(e.title) + '</span>' +
-        (e.location ? '<span class="event-loc">' + escapeHtml(e.location) + '</span>' : '') +
+        // dir="auto": Hebrew (or any right-to-left) titles lay out and truncate on their own side.
+        '<span class="event-title" dir="auto">' + escapeHtml(e.title) + '</span>' +
+        (e.location ? '<span class="event-loc" dir="auto">' + escapeHtml(e.location) + '</span>' : '') +
         '</div>';
     }
 
