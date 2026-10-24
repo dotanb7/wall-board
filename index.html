@@ -242,11 +242,16 @@
     stroke-width: 2.5;
     stroke-linecap: round;
     stroke-linejoin: round;
-    opacity: 0.85;
+    /* Faint until used; bright while in use (see wakeControls in app.html). */
+    opacity: 0.3;
+    -webkit-transition: opacity 0.4s ease;
+    transition: opacity 0.4s ease;
     -webkit-filter: drop-shadow(0 0 0.4rem rgba(0, 0, 0, 0.9));
     filter: drop-shadow(0 0 0.4rem rgba(0, 0, 0, 0.9));
   }
-  .nav:active svg { opacity: 1; }
+  .controls.active .nav svg { opacity: 0.9; }
+  .nav:active svg,
+  .controls.active .nav:active svg { opacity: 1; }
   .nav-pause .icon-play,
   .nav-pause.is-paused .icon-pause { display: none; }
   .nav-pause.is-paused .icon-play { display: block; }
@@ -307,7 +312,7 @@
     </main>
     <div class="overlay" id="slideshow">
       <div class="slides" id="slides"></div>
-      <div class="controls">
+      <div class="controls" id="controls">
         <button class="nav nav-prev" id="nav-prev" aria-label="Previous photo">
           <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15,4 7,12 15,20"/></svg>
         </button>
@@ -359,6 +364,7 @@
     var PHOTO_LIST_MAX_AGE_MS = 30 * 60 * 1000;
     var PHOTO_RETRY_MS = 5000;
     var PHOTO_HISTORY_MAX = 50;
+    var CONTROLS_AWAKE_MS = 5000; // Controls stay bright this long after the last press.
 
     var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     var DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1071,6 +1077,17 @@
       btn.setAttribute('aria-label', paused ? 'Play slideshow' : 'Pause slideshow');
     }
 
+    // Brightens the slideshow controls on use; they fade back after a few seconds untouched.
+    var controlsTimer = null;
+    function wakeControls() {
+      var el = $('controls');
+      if (!/\bactive\b/.test(el.className)) el.className += ' active';
+      clearTimeout(controlsTimer);
+      controlsTimer = setTimeout(function () {
+        el.className = el.className.replace(/\s*\bactive\b/, '');
+      }, CONTROLS_AWAKE_MS);
+    }
+
     function togglePause() {
       if (!slides.running) return;
       setPaused(!slides.paused);
@@ -1267,9 +1284,9 @@
     tick();
     trigger('start');
     setInterval(function () { trigger('check'); }, VIEW_CHECK_MS);
-    $('nav-prev').addEventListener('click', function () { navigate(-1); });
-    $('nav-next').addEventListener('click', function () { navigate(1); });
-    $('nav-pause').addEventListener('click', togglePause);
+    $('nav-prev').addEventListener('click', function () { wakeControls(); navigate(-1); });
+    $('nav-next').addEventListener('click', function () { wakeControls(); navigate(1); });
+    $('nav-pause').addEventListener('click', function () { wakeControls(); togglePause(); });
     document.addEventListener('touchstart', onTap, true);
     document.addEventListener('mousedown', onTap, true);
     fetchWeather();
