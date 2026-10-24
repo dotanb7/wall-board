@@ -211,6 +211,7 @@
   .slide.quick { transition-duration: 0.3s; }
   .slide.fit-cover { object-fit: cover; }
   .slide.fit-contain { object-fit: contain; }
+  /* Arrows: white chevrons with the same dark glow as the corner clock; no box behind them. */
   .nav {
     position: absolute;
     top: 50%;
@@ -219,20 +220,14 @@
     height: 9rem;
     padding: 1.5rem 0.8rem;
     border: 0;
-    border-radius: 1rem;
-    background: rgba(0, 0, 0, 0.25);
-    color: rgba(255, 255, 255, 0.55);
+    background: transparent;
+    color: #f5f5f5;
     -webkit-tap-highlight-color: transparent;
     outline: none;
   }
-  .nav:active { background: rgba(0, 0, 0, 0.55); color: #fff; }
-  .nav.busy { animation: nav-pulse 0.5s ease-in-out 2; }
-  @keyframes nav-pulse {
-    0%, 100% { background: rgba(0, 0, 0, 0.25); }
-    50% { background: rgba(255, 255, 255, 0.3); }
-  }
   .nav-prev { left: 1.5rem; }
   .nav-next { right: 1.5rem; }
+  .nav-hidden { visibility: hidden; }
   .nav svg {
     width: 100%;
     height: 100%;
@@ -241,7 +236,14 @@
     stroke-width: 2.5;
     stroke-linecap: round;
     stroke-linejoin: round;
+    opacity: 0.85;
+    -webkit-filter: drop-shadow(0 0 0.4rem rgba(0, 0, 0, 0.9));
+    filter: drop-shadow(0 0 0.4rem rgba(0, 0, 0, 0.9));
   }
+  .nav:active svg { opacity: 1; }
+  .nav.busy svg { -webkit-animation: nav-pulse 0.5s ease-in-out 2; animation: nav-pulse 0.5s ease-in-out 2; }
+  @-webkit-keyframes nav-pulse { 50% { opacity: 0.25; } }
+  @keyframes nav-pulse { 50% { opacity: 0.25; } }
   .corner {
     position: absolute;
     right: 2rem;
@@ -824,7 +826,7 @@
     // run counts start/stop cycles; callbacks from an earlier run see a different value and bail out.
     var slides = { running: false, run: 0, ids: [], order: [], pos: 0, listedAt: 0, shown: -1,
       nextReady: false, failures: 0, swapTimer: null, retryTimer: null, slots: [],
-      history: [], cursor: -1, nextIndex: -1, load: 0, lastSwapAt: 0, lastFadeMs: FADE_MS, blobs: [] };
+      history: [], cursor: -1, newest: -1, nextIndex: -1, load: 0, lastSwapAt: 0, lastFadeMs: FADE_MS, blobs: [] };
 
     function isCurrentRun(run) { return slides.running && slides.run === run; }
 
@@ -1021,11 +1023,14 @@
       slides.nextReady = false;
       slides.lastSwapAt = Date.now();
       slides.lastFadeMs = fadeMs;
+      if (slides.cursor > slides.newest) slides.newest = slides.cursor;
       if (slides.history.length > PHOTO_HISTORY_MAX) {
         var drop = slides.history.length - PHOTO_HISTORY_MAX;
         slides.history.splice(0, drop);
         slides.cursor -= drop;
+        slides.newest -= drop;
       }
+      updateNavArrows();
       var run = slides.run;
       // Once the fade finishes, free the old photo and start loading the next one into its slot.
       setTimeout(function () {
@@ -1049,16 +1054,14 @@
       }
     }
 
-    // Back from the first photo in the history: put a random other photo in front of it,
-    // so back always works and next then returns to where you were.
-    function prependPhoto() {
-      var current = slides.history[slides.cursor];
-      var others = slides.ids.filter(function (id) { return id !== current; });
-      if (!others.length) return false;
-      slides.history.unshift(others[Math.floor(Math.random() * others.length)]);
-      slides.cursor++;
-      if (slides.nextIndex >= 0) slides.nextIndex++;
-      return true;
+    // Back shows when there is an earlier photo; next only after going back (newest = latest shown).
+    function updateNavArrows() {
+      setHidden($('nav-prev'), slides.cursor <= 0);
+      setHidden($('nav-next'), slides.cursor >= slides.newest);
+    }
+
+    function setHidden(el, hidden) {
+      el.className = el.className.replace(/\s*\bnav-hidden\b/, '') + (hidden ? ' nav-hidden' : '');
     }
 
     // Arrow buttons: step = -1 (previous) or +1 (next).
@@ -1067,8 +1070,9 @@
       // Ignore taps during a crossfade: the fading photo still holds the other slot.
       if (Date.now() - slides.lastSwapAt < slides.lastFadeMs + 200) return;
       var target = slides.cursor + step;
-      if (target < 0 && !prependPhoto()) return;
-      if (target < 0) target = 0;
+      // Arrows are hidden at the ends, but guard anyway: nothing before the first photo,
+      // and next only replays photos already shown.
+      if (target < 0 || target > slides.newest) return;
       if (step > 0 && slides.nextReady && slides.nextIndex === target) {
         swapSlides(true);
         return;
@@ -1100,6 +1104,11 @@
       slides.run++;
       if (slides.slots.length) { releaseSlot(0); releaseSlot(1); }
       slides.shown = -1;
+      slides.history = [];
+      slides.cursor = -1;
+      slides.newest = -1;
+      slides.nextIndex = -1;
+      updateNavArrows();
       slides.failures = 0;
       preloadHidden();
     }
