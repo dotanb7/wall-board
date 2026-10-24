@@ -19,6 +19,11 @@
     --line: #2a2e35;
     --accent: #facc15;
     --rain: #60a5fa;
+    /* Used only while a background image shows (html.has-bg). */
+    --glow: rgba(0, 0, 0, 0.75);
+    --card-on-bg: rgba(0, 0, 0, 0.3);
+    --cloud-on-bg: rgba(255, 255, 255, 0.12);
+    --muted-on-bg: #e4e6ea;
   }
   html[data-theme="light"] {
     --bg: #f4f4f0;
@@ -28,6 +33,20 @@
     --line: #d4d4cf;
     --accent: #ca8a04;
     --rain: #1d4ed8;
+    --glow: rgba(255, 255, 255, 0.8);
+    --card-on-bg: rgba(255, 255, 255, 0.35);
+    --cloud-on-bg: rgba(255, 255, 255, 0.45);
+    --muted-on-bg: #2b2f35;
+  }
+
+  /* Over a background photo: soft glow behind text, see-through cards and cloud fills. */
+  html.has-bg { --muted: var(--muted-on-bg); }
+  html.has-bg .board { text-shadow: 0 0 0.5rem var(--glow), 0 0 0.15rem var(--glow); }
+  html.has-bg .event-all-day { background: var(--card-on-bg); }
+  html.has-bg .board .icon .cloud { fill: var(--cloud-on-bg); }
+  html.has-bg .board .icon {
+    -webkit-filter: drop-shadow(0 0 0.3rem var(--glow));
+    filter: drop-shadow(0 0 0.3rem var(--glow));
   }
 
   /* 1 rem tracks viewport height so the layout scales with the screen. */
@@ -847,6 +866,9 @@
       bg.url = url;
       bg.isBlob = isBlob;
       $('board-bg').style.backgroundImage = url ? 'url("' + url + '")' : 'none';
+      // Switches the board's cards, clouds and text to their see-through, glowing variants.
+      var html = document.documentElement;
+      html.className = html.className.replace(/\s*\bhas-bg\b/, '') + (url ? ' has-bg' : '');
     }
 
     function applyTheme() {
