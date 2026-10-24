@@ -815,7 +815,7 @@
     // settings.background is '' (none), an https URL, or 'drive:<tag>' for a Drive file fetched
     // through api=background and kept in localStorage, so reloads don't download it again.
 
-    var bg = { tag: null, url: null, isBlob: false };
+    var bg = { tag: null, url: null, isBlob: false, error: '' };
 
     function applyBackground() {
       var tag = settings.background || '';
@@ -831,10 +831,14 @@
       }
       serverCall('background', {}, 'getBackground', function (data) {
         if (bg.tag !== tag) return;
+        bg.error = '';
         save(STORAGE_BACKGROUND, { tag: tag, mime: data.mime, base64: data.base64 });
         setBackgroundUrl(URL.createObjectURL(base64ToBlob(data.base64, data.mime)), true);
-      }, function () {
+        renderBoardStatus();
+      }, function (err) {
         bg.tag = null; // Try again with the next board update.
+        bg.error = err || 'network error';
+        renderBoardStatus();
       });
     }
 
@@ -880,6 +884,7 @@
         for (var i = 0; i < sources.length; i++) {
           if (!sources[i].ok) notes.push(sources[i].name + ': ' + (sources[i].error || 'not updating'));
         }
+        if (bg.error) notes.push('Background: ' + bg.error);
       }
       el.className = 'status' + (notes.length ? ' status-warn' : '');
       el.textContent = notes.join(' \u00b7 ');
@@ -1297,6 +1302,8 @@
         (slides.running ? (slides.paused ? ', PAUSED' : '') + ', shown slot ' + slides.shown + ', next ' + (slides.nextReady ? 'ready' : 'loading') +
           ', failures ' + slides.failures : '') +
         (slides.lastError ? ' | last error: ' + slides.lastError : '') +
+        ' | background ' + (settings.background ? settings.background.slice(0, 18) + ' @' + settings.background_opacity +
+          (bg.url ? ' shown' : bg.error ? ' error: ' + bg.error : ' loading') : 'none') +
         ' | board data ' + boardAge + ' | hold ' + settings.board_hold_min + ' min, photo ' + settings.photo_seconds +
         ' s, night ' + (settings.night_hours || 'off') + ', morning ' + (settings.morning_board || 'off');
     }
