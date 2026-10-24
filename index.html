@@ -7,9 +7,40 @@
     <meta name="referrer" content="no-referrer">
     <title>Wall Info Board</title>
     <style>
+  /* ---------- Design tokens ----------
+     Every size and spacing below comes from these. 1 rem tracks the viewport height (see html),
+     so the whole board scales with the screen. Pick the nearest token rather than a new number. */
   :root {
-    /* Google's notice banner sits above the app frame and pushes it down, so only a small margin is needed. */
-    --banner-space: 1.5rem;
+    /* Type scale. */
+    --fs-clock: 11rem;   /* main clock */
+    --fs-hero: 6rem;     /* current temperature */
+    --fs-display: 5rem;  /* slideshow and night clocks */
+    --fs-xl: 2.6rem;     /* date */
+    --fs-l: 2.2rem;      /* events, conditions, corner temperature */
+    --fs-m: 2rem;        /* daily forecast rows */
+    --fs-s: 1.6rem;      /* headings, details, hourly strip */
+    --fs-xs: 1.3rem;     /* status notes, rain chance */
+    --fs-mono: 1.1rem;   /* debug line */
+
+    /* Spacing. */
+    --sp-xs: 0.3rem;
+    --sp-s: 0.5rem;
+    --sp-m: 1rem;
+    --sp-l: 1.5rem;
+    --sp-xl: 2rem;
+
+    /* Icons. */
+    --icon-l: 8rem;
+    --icon-m: 2.8rem;
+
+    /* Event rows: color bar on the left, tinted bar behind. */
+    --event-bar: 0.5rem;
+
+    /* Soft dark glow behind light text and icons that sit on photos. */
+    --glow-photo: 0 0 0.6rem rgba(0, 0, 0, 0.9);
+
+    /* Google's notice banner sits above the app frame and pushes it down; only a small margin. */
+    --banner-space: var(--sp-l);
   }
   html[data-theme="dark"] {
     --bg: #000000;
@@ -40,16 +71,15 @@
   }
 
   /* Over a background photo: soft glow behind text, see-through cards and cloud fills. */
-  html.has-bg { --muted: var(--muted-on-bg); }
+  html.has-bg { --muted: var(--muted-on-bg); --card: var(--card-on-bg); }
   html.has-bg .board { text-shadow: 0 0 0.5rem var(--glow), 0 0 0.15rem var(--glow); }
-  html.has-bg .event-all-day { background: var(--card-on-bg); }
   html.has-bg .board .icon .cloud { fill: var(--cloud-on-bg); }
   html.has-bg .board .icon {
     -webkit-filter: drop-shadow(0 0 0.3rem var(--glow));
     filter: drop-shadow(0 0 0.3rem var(--glow));
   }
 
-  /* 1 rem tracks viewport height so the layout scales with the screen. */
+  /* ---------- Base ---------- */
   html { font-size: 2vh; }
   html, body {
     margin: 0;
@@ -62,6 +92,7 @@
     user-select: none;
   }
   * { box-sizing: border-box; }
+  .muted { color: var(--muted); }
 
   .board-bg {
     position: fixed;
@@ -76,33 +107,34 @@
     display: -webkit-box;
     display: flex;
     height: 100%;
-    padding: var(--banner-space) 2rem 1.5rem;
+    padding: var(--banner-space) var(--sp-xl) var(--sp-l);
   }
   .pane { min-width: 0; }
   .pane-left {
     flex: 0 0 52%;
-    padding-right: 2rem;
+    padding-right: var(--sp-xl);
     display: flex;
     flex-direction: column;
   }
   .pane-right {
     flex: 1 1 auto;
-    padding-left: 2rem;
+    padding-left: var(--sp-xl);
     border-left: 1px solid var(--line);
     display: flex;
     flex-direction: column;
   }
 
+  /* ---------- Clock and calendar ---------- */
   .clock {
-    font-size: 11rem;
+    font-size: var(--fs-clock);
     font-weight: 300;
     line-height: 1;
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
   }
   .date {
-    margin-top: 0.75rem;
-    font-size: 2.6rem;
+    margin-top: var(--sp-m);
+    font-size: var(--fs-xl);
     color: var(--muted);
   }
 
@@ -110,46 +142,47 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
-    margin-top: 1.5rem;
+    margin-top: var(--sp-l);
   }
-  .agenda-day { margin-bottom: 1rem; }
+  .agenda-day { margin-bottom: var(--sp-m); }
   .agenda-heading {
-    font-size: 1.6rem;
+    font-size: var(--fs-s);
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    margin-bottom: 0.4rem;
+    margin-bottom: var(--sp-xs);
   }
+  /* One style for every event, timed or all-day, today or later. */
   .event {
     display: flex;
     align-items: baseline;
-    border-left: 0.5rem solid var(--muted);
-    padding: 0.2rem 0 0.2rem 0.9rem;
-    margin-bottom: 0.4rem;
-    font-size: 1.9rem;
+    font-size: var(--fs-l);
+    padding: var(--sp-xs) var(--sp-s) var(--sp-xs) var(--sp-m);
+    margin-bottom: var(--sp-xs);
+    border-left: var(--event-bar) solid var(--muted);
+    background: var(--card);
     white-space: nowrap;
     overflow: hidden;
   }
-  .agenda-today .event { font-size: 2.3rem; }
   .event-time {
     flex: 0 0 auto;
-    min-width: 5.2em;
+    margin-right: 0.6em;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
   .event-title { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
   .event-loc {
     flex: 0 1 auto;
-    margin-left: 0.8rem;
-    font-size: 0.75em;
+    margin-left: var(--sp-m);
+    font-size: var(--fs-s);
     color: var(--muted);
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .event-all-day { background: var(--card); }
-  .agenda-empty { font-size: 1.9rem; color: var(--muted); }
+  .agenda-empty { font-size: var(--fs-l); color: var(--muted); }
   .pane-left .status { text-align: left; }
 
+  /* ---------- Weather ---------- */
   .icon { display: block; }
   .icon * {
     fill: none;
@@ -166,16 +199,16 @@
     display: flex;
     align-items: center;
   }
-  .now .icon { width: 8rem; height: 8rem; flex: 0 0 auto; }
-  .now-main { margin-left: 1.5rem; }
-  .now-temp { font-size: 6rem; line-height: 1; font-weight: 300; }
-  .now-desc { font-size: 2.2rem; margin-top: 0.25rem; }
-  .now-meta { font-size: 1.6rem; color: var(--muted); margin-top: 0.3rem; white-space: nowrap; }
+  .now .icon { width: var(--icon-l); height: var(--icon-l); flex: 0 0 auto; }
+  .now-main { margin-left: var(--sp-l); }
+  .now-temp { font-size: var(--fs-hero); line-height: 1; font-weight: 300; }
+  .now-desc { font-size: var(--fs-l); margin-top: var(--sp-xs); }
+  .now-meta { font-size: var(--fs-s); color: var(--muted); margin-top: var(--sp-xs); white-space: nowrap; }
 
   .hourly {
     display: flex;
-    margin-top: 1.5rem;
-    padding: 0.8rem 0;
+    margin-top: var(--sp-l);
+    padding: var(--sp-m) 0;
     border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
   }
@@ -184,33 +217,33 @@
     text-align: center;
     min-width: 0;
   }
-  .hour-time { font-size: 1.5rem; color: var(--muted); white-space: nowrap; }
-  .hour .icon { width: 2.8rem; height: 2.8rem; margin: 0.3rem auto; }
-  .hour-temp { font-size: 1.7rem; }
-  .hour-pop { font-size: 1.2rem; color: var(--rain); min-height: 1.5rem; }
+  .hour-time { font-size: var(--fs-s); color: var(--muted); white-space: nowrap; }
+  .hour .icon { width: var(--icon-m); height: var(--icon-m); margin: var(--sp-xs) auto; }
+  .hour-temp { font-size: var(--fs-s); }
+  .hour-pop { font-size: var(--fs-xs); color: var(--rain); min-height: var(--sp-l); }
 
-  .daily { margin-top: 0.5rem; }
+  .daily { margin-top: var(--sp-s); }
   .day {
     display: flex;
     align-items: center;
-    padding: 0.3rem 0;
-    font-size: 2rem;
+    padding: var(--sp-xs) 0;
+    font-size: var(--fs-m);
   }
   .day-name { flex: 0 0 7rem; }
-  .day .icon { width: 2.8rem; height: 2.8rem; margin-right: 1rem; }
-  .day-pop { flex: 0 0 5rem; font-size: 1.5rem; color: var(--rain); }
+  .day .icon { width: var(--icon-m); height: var(--icon-m); margin-right: var(--sp-m); }
+  .day-pop { flex: 0 0 5rem; font-size: var(--fs-s); color: var(--rain); }
   .day-temps { flex: 1 1 auto; text-align: right; }
-  .day-min { color: var(--muted); margin-left: 1rem; }
+  .day-min { color: var(--muted); margin-left: var(--sp-m); }
 
   .status {
     margin-top: auto;
-    font-size: 1.4rem;
+    font-size: var(--fs-xs);
     color: var(--muted);
     text-align: right;
   }
   .status-warn { color: var(--accent); }
 
-  /* View states: the board stays underneath; slideshow and night cover it. */
+  /* ---------- View states: the board stays underneath; slideshow and night cover it ---------- */
   .overlay {
     position: fixed;
     top: 0; right: 0; bottom: 0; left: 0;
@@ -240,22 +273,23 @@
   .slide.quick { transition-duration: 0.3s; }
   .slide.fit-cover { object-fit: cover; }
   .slide.fit-contain { object-fit: contain; }
-  /* Controls: white icons with the same dark glow as the corner clock; no box behind them.
-     Centered at the bottom; a hidden arrow keeps its space so pause stays centered. */
+
+  /* Controls: white icons with the photo glow; no box behind them. Centered at the bottom;
+     a hidden arrow keeps its space so pause stays centered. */
   .controls {
     position: absolute;
     left: 0;
     right: 0;
     /* Measured: puts the bottom of the icons on the bottom of the corner's temperature text. */
-    bottom: 1.06rem;
+    bottom: var(--controls-bottom, 1.06rem);
     display: flex;
     justify-content: center;
   }
   .nav {
     width: 6rem;
     height: 6rem;
-    margin: 0 1.5rem;
-    padding: 1rem;
+    margin: 0 var(--sp-l);
+    padding: var(--sp-m);
     border: 0;
     background: transparent;
     color: #f5f5f5;
@@ -275,8 +309,8 @@
     opacity: 0.3;
     -webkit-transition: opacity 0.4s ease;
     transition: opacity 0.4s ease;
-    -webkit-filter: drop-shadow(0 0 0.4rem rgba(0, 0, 0, 0.9));
-    filter: drop-shadow(0 0 0.4rem rgba(0, 0, 0, 0.9));
+    -webkit-filter: drop-shadow(var(--glow-photo));
+    filter: drop-shadow(var(--glow-photo));
   }
   .controls.active .nav svg { opacity: 0.9; }
   .nav:active svg,
@@ -287,40 +321,49 @@
   .nav.busy svg { -webkit-animation: nav-pulse 0.5s ease-in-out 2; animation: nav-pulse 0.5s ease-in-out 2; }
   @-webkit-keyframes nav-pulse { 50% { opacity: 0.25; } }
   @keyframes nav-pulse { 50% { opacity: 0.25; } }
+
   .corner {
     position: absolute;
-    right: 2rem;
-    bottom: 1.5rem;
+    right: var(--sp-xl);
+    bottom: var(--sp-l);
     text-align: right;
-    text-shadow: 0 0 0.6rem rgba(0, 0, 0, 0.9);
+    text-shadow: var(--glow-photo);
   }
-  .corner-clock { font-size: 5rem; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums; }
-  .corner-weather { display: flex; align-items: center; justify-content: flex-end; font-size: 2.4rem; margin-top: 0.3rem; }
-  .corner-weather .icon { width: 2.8rem; height: 2.8rem; margin-right: 0.6rem; }
+  .corner-clock { font-size: var(--fs-display); font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums; }
+  .corner-weather {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    font-size: var(--fs-l);
+    margin-top: var(--sp-xs);
+  }
+  .corner-weather .icon { width: var(--icon-m); height: var(--icon-m); margin-right: var(--sp-s); }
   .corner-weather .icon .cloud { fill: rgba(0, 0, 0, 0.4); }
-  .corner-note { font-size: 1.4rem; color: #facc15; margin-top: 0.4rem; max-width: 40rem; }
-  .debug {
-    position: fixed;
-    left: 0; right: 0; bottom: 0;
-    z-index: 10;
-    padding: 0.2rem 0.6rem;
-    font: 1.1rem/1.3 monospace;
-    color: #facc15;
-    background: rgba(0, 0, 0, 0.7);
-    pointer-events: none;
-  }
-  .debug:empty { display: none; }
+  .corner-note { font-size: var(--fs-xs); color: #facc15; margin-top: var(--sp-xs); max-width: 40rem; }
+
   .night-clock {
     position: absolute;
     top: 50%;
     left: 0;
     right: 0;
-    margin-top: -2.5rem;
+    margin-top: calc(var(--fs-display) / -2);
     text-align: center;
-    font-size: 5rem;
+    font-size: var(--fs-display);
     font-weight: 300;
     color: #1c1c1c;
   }
+
+  .debug {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 10;
+    padding: var(--sp-xs) var(--sp-s);
+    font: var(--fs-mono)/1.3 monospace;
+    color: #facc15;
+    background: rgba(0, 0, 0, 0.7);
+    pointer-events: none;
+  }
+  .debug:empty { display: none; }
 </style>
 
   </head>
