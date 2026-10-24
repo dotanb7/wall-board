@@ -210,6 +210,32 @@
   .slide.show { opacity: 1; }
   .slide.fit-cover { object-fit: cover; }
   .slide.fit-contain { object-fit: contain; }
+  .nav {
+    position: absolute;
+    top: 50%;
+    margin-top: -4.5rem;
+    width: 6rem;
+    height: 9rem;
+    padding: 1.5rem 0.8rem;
+    border: 0;
+    border-radius: 1rem;
+    background: rgba(0, 0, 0, 0.25);
+    color: rgba(255, 255, 255, 0.55);
+    -webkit-tap-highlight-color: transparent;
+    outline: none;
+  }
+  .nav:active { background: rgba(0, 0, 0, 0.55); color: #fff; }
+  .nav-prev { left: 1.5rem; }
+  .nav-next { right: 1.5rem; }
+  .nav svg {
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
   .corner {
     position: absolute;
     right: 2rem;
@@ -264,6 +290,12 @@
     </main>
     <div class="overlay" id="slideshow">
       <div class="slides" id="slides"></div>
+      <button class="nav nav-prev" id="nav-prev" aria-label="Previous photo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15,4 7,12 15,20"/></svg>
+      </button>
+      <button class="nav nav-next" id="nav-next" aria-label="Next photo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="9,4 17,12 9,20"/></svg>
+      </button>
       <div class="corner">
         <div class="corner-clock" id="slide-clock"></div>
         <div class="corner-weather" id="slide-weather"></div>
@@ -301,6 +333,7 @@
     var FADE_MS = 1500;
     var PHOTO_LIST_MAX_AGE_MS = 30 * 60 * 1000;
     var PHOTO_RETRY_MS = 5000;
+    var PHOTO_HISTORY_MAX = 50;
 
     var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     var DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -782,7 +815,8 @@
 
     // run counts start/stop cycles; callbacks from an earlier run see a different value and bail out.
     var slides = { running: false, run: 0, ids: [], order: [], pos: 0, listedAt: 0, shown: -1,
-      nextReady: false, failures: 0, swapTimer: null, retryTimer: null, slots: [] };
+      nextReady: false, failures: 0, swapTimer: null, retryTimer: null, slots: [],
+      history: [], cursor: -1, nextIndex: -1, load: 0, lastSwapAt: 0 };
 
     function isCurrentRun(run) { return slides.running && slides.run === run; }
 
@@ -866,29 +900,52 @@
       }, function (err) { slides.lastError = 'Photo list: ' + (err || 'network error'); done(); });
     }
 
-    // Loads the next photo into the hidden slot; calls back when it is decoded and ready to show.
-    function preload(i, done) {
+    // history lists photo ids in the order they were (or will be) shown. cursor is the one on screen,
+    // nextIndex the one waiting in the hidden slot. The arrow buttons walk this list, so going back
+    // and then forward replays the same photos.
+    function upcomingIndex() {
+      if (slides.cursor + 1 < slides.history.length) return slides.cursor + 1;
+      slides.history.push(nextPhotoId());
+      return slides.history.length - 1;
+    }
+
+    // Loads history[index] (or the upcoming photo, if index is null) into slot i and calls back
+    // done(ok, index) once it is decoded. Each call supersedes any load still in flight.
+    function preload(i, wantIndex, done) {
       var run = slides.run;
+      var load = ++slides.load;
+      function current() { return isCurrentRun(run) && load === slides.load; }
       withPhotoList(function () {
-        if (!isCurrentRun(run)) return;
+        if (!current()) return;
         if (!slides.ids.length) {
           if (!slides.lastError) slides.lastError = 'Photo list is empty';
-          return done(false);
+          return done(false, -1);
         }
-        var id = nextPhotoId();
+        var index = wantIndex === null ? upcomingIndex() : wantIndex;
+        var id = slides.history[index];
         serverCall('photo', { id: id }, 'getPhoto', function (data) {
-          if (!isCurrentRun(run)) return;
+          if (!current()) return;
           releaseSlot(i);
           var s = slot(i);
           s.url = base64ToObjectUrl(data.base64, data.mime);
           s.img.onload = function () {
             s.img.onload = s.img.onerror = null;
+            if (!current()) return;
             s.img.className = 'slide ' + (s.img.naturalWidth >= s.img.naturalHeight ? 'fit-cover' : 'fit-contain');
-            done(true);
+            done(true, index);
           };
-          s.img.onerror = function () { slides.lastError = 'Photo ' + id + ' is not a readable image'; releaseSlot(i); done(false); };
+          s.img.onerror = function () {
+            if (!current()) return;
+            slides.lastError = 'Photo ' + id + ' is not a readable image';
+            releaseSlot(i);
+            done(false, index);
+          };
           s.img.src = s.url;
-        }, function (err) { slides.lastError = 'Photo ' + id + ': ' + (err || 'network error'); done(false); });
+        }, function (err) {
+          if (!current()) return;
+          slides.lastError = 'Photo ' + id + ': ' + (err || 'network error');
+          done(false, index);
+        });
       });
     }
 
@@ -896,14 +953,17 @@
       var run = slides.run;
       var hidden = slides.shown === 0 ? 1 : 0;
       slides.nextReady = false;
-      preload(hidden, function (ok) {
+      preload(hidden, null, function (ok, index) {
         if (!isCurrentRun(run)) return;
         if (ok) {
           slides.failures = 0;
           slides.lastError = '';
+          slides.nextIndex = index;
           slides.nextReady = true;
           if (slides.shown === -1) swapSlides();
         } else {
+          // Drop the broken photo from what's ahead, so the retry tries a different one.
+          if (index > slides.cursor) slides.history.splice(index, 1);
           slides.failures++;
           slides.retryTimer = setTimeout(preloadHidden, PHOTO_RETRY_MS * Math.min(slides.failures, 12));
           renderSlideNote();
@@ -923,7 +983,15 @@
       slot(hidden).img.className += ' show';
       if (old !== -1) slot(old).img.className = slot(old).img.className.replace(/\s*\bshow\b/, '');
       slides.shown = hidden;
+      slides.cursor = slides.nextIndex;
+      slides.nextIndex = -1;
       slides.nextReady = false;
+      slides.lastSwapAt = Date.now();
+      if (slides.history.length > PHOTO_HISTORY_MAX) {
+        var drop = slides.history.length - PHOTO_HISTORY_MAX;
+        slides.history.splice(0, drop);
+        slides.cursor -= drop;
+      }
       var run = slides.run;
       // Once the fade finishes, free the old photo and start loading the next one into its slot.
       setTimeout(function () {
@@ -932,6 +1000,36 @@
         preloadHidden();
       }, FADE_MS + 100);
       slides.swapTimer = setTimeout(swapSlides, (settings.photo_seconds || 30) * 1000);
+    }
+
+    // Arrow buttons: step = -1 (previous) or +1 (next).
+    function navigate(step) {
+      if (!slides.running || slides.shown === -1) return;
+      // Ignore taps during a crossfade: the fading photo still holds the other slot.
+      if (Date.now() - slides.lastSwapAt < FADE_MS + 200) return;
+      var target = slides.cursor + step;
+      if (target < 0) return; // Nothing earlier in the history.
+      if (step > 0 && slides.nextReady && slides.nextIndex === target) {
+        swapSlides();
+        return;
+      }
+      clearTimeout(slides.swapTimer);
+      clearTimeout(slides.retryTimer);
+      var run = slides.run;
+      var hidden = slides.shown === 0 ? 1 : 0;
+      slides.nextReady = false;
+      preload(hidden, step > 0 ? null : target, function (ok, index) {
+        if (!isCurrentRun(run)) return;
+        if (ok) {
+          slides.nextIndex = index;
+          slides.nextReady = true;
+          swapSlides();
+        } else {
+          renderSlideNote();
+          preloadHidden();
+          slides.swapTimer = setTimeout(swapSlides, (settings.photo_seconds || 30) * 1000);
+        }
+      });
     }
 
     function startSlideshow() {
@@ -1039,7 +1137,18 @@
     }
     window.trigger = trigger;
 
-    function onTap() { trigger('presence'); }
+    // Taps on the slideshow's arrow buttons navigate photos instead of counting as presence.
+    function isInNav(el) {
+      for (; el && el !== document; el = el.parentNode) {
+        if (typeof el.className === 'string' && /\bnav\b/.test(el.className)) return true;
+      }
+      return false;
+    }
+
+    function onTap(e) {
+      if (isInNav(e && e.target)) return;
+      trigger('presence');
+    }
 
     // ---------- Start ----------
 
@@ -1050,6 +1159,8 @@
     tick();
     trigger('start');
     setInterval(function () { trigger('check'); }, VIEW_CHECK_MS);
+    $('nav-prev').addEventListener('click', function () { navigate(-1); });
+    $('nav-next').addEventListener('click', function () { navigate(1); });
     document.addEventListener('touchstart', onTap, true);
     document.addEventListener('mousedown', onTap, true);
     fetchWeather();
