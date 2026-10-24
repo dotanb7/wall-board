@@ -44,7 +44,16 @@
   }
   * { box-sizing: border-box; }
 
+  .board-bg {
+    position: fixed;
+    top: 0; right: 0; bottom: 0; left: 0;
+    background-size: cover;
+    background-position: center;
+    opacity: 0;
+    transition: opacity 1s ease;
+  }
   .board {
+    position: relative; /* Above .board-bg. */
     display: -webkit-box;
     display: flex;
     height: 100%;
@@ -192,7 +201,8 @@
     visibility: hidden;
     transition: opacity 1s ease, visibility 0s linear 1s;
   }
-  .state-slideshow #slideshow,
+  /* The slideshow only covers the board once its first photo is ready: no black gap. */
+  .state-slideshow #slideshow.ready,
   .state-night #night {
     opacity: 1;
     visibility: visible;
@@ -296,6 +306,7 @@
 
   </head>
   <body>
+    <div class="board-bg" id="board-bg"></div>
     <main class="board">
       <section class="pane pane-left">
         <div class="clock" id="clock">--:--</div>
@@ -355,6 +366,7 @@
     var BOARD_REFRESH_MS = 5 * 60 * 1000;
     var BOARD_STALE_MS = 20 * 60 * 1000;
     var STORAGE_BOARD = 'wib.board.v1';
+    var STORAGE_BACKGROUND = 'wib.background.v1';
     var DEFAULT_EVENT_COLOR = '#9ca3af';
     var VIEW_CHECK_MS = 5000;
     var NIGHT_PEEK_MS = 30 * 1000;
@@ -791,11 +803,46 @@
         next.units !== settings.units || next.timezone !== settings.timezone;
       settings = next;
       applyTheme();
+      applyBackground();
       if (weatherChanged) {
         weather = null;
         renderWeather();
         fetchWeather();
       }
+    }
+
+    // ---------- Background image ----------
+    // settings.background is '' (none), an https URL, or 'drive:<tag>' for a Drive file fetched
+    // through api=background and kept in localStorage, so reloads don't download it again.
+
+    var bg = { tag: null, url: null, isBlob: false };
+
+    function applyBackground() {
+      var tag = settings.background || '';
+      var opacity = settings.background_opacity === undefined ? 0.25 : settings.background_opacity;
+      $('board-bg').style.opacity = tag ? String(opacity) : '0';
+      if (tag === bg.tag) return;
+      bg.tag = tag;
+      if (!tag) return setBackgroundUrl(null, false);
+      if (tag.indexOf('https://') === 0) return setBackgroundUrl(tag, false);
+      var cached = load(STORAGE_BACKGROUND);
+      if (cached && cached.tag === tag) {
+        return setBackgroundUrl(URL.createObjectURL(base64ToBlob(cached.base64, cached.mime)), true);
+      }
+      serverCall('background', {}, 'getBackground', function (data) {
+        if (bg.tag !== tag) return;
+        save(STORAGE_BACKGROUND, { tag: tag, mime: data.mime, base64: data.base64 });
+        setBackgroundUrl(URL.createObjectURL(base64ToBlob(data.base64, data.mime)), true);
+      }, function () {
+        bg.tag = null; // Try again with the next board update.
+      });
+    }
+
+    function setBackgroundUrl(url, isBlob) {
+      if (bg.url && bg.isBlob) URL.revokeObjectURL(bg.url);
+      bg.url = url;
+      bg.isBlob = isBlob;
+      $('board-bg').style.backgroundImage = url ? 'url("' + url + '")' : 'none';
     }
 
     function applyTheme() {
@@ -1032,6 +1079,8 @@
       }
       var hidden = slides.shown === 0 ? 1 : 0;
       var old = slides.shown;
+      // The first photo of a run is already in place when the overlay fades in over the board.
+      if (old === -1) quick = true;
       var fadeMs = quick === true ? QUICK_FADE_MS : FADE_MS;
       setQuick(slot(hidden).img, quick === true);
       slot(hidden).img.className += ' show';
@@ -1041,6 +1090,7 @@
       }
       setNavBusy(null);
       slides.shown = hidden;
+      if (old === -1) setOverlayReady(true);
       slides.cursor = slides.nextIndex;
       slides.nextIndex = -1;
       slides.nextReady = false;
@@ -1151,10 +1201,16 @@
       });
     }
 
+    function setOverlayReady(ready) {
+      var el = $('slideshow');
+      el.className = el.className.replace(/\s*\bready\b/, '') + (ready ? ' ready' : '');
+    }
+
     function startSlideshow() {
       if (slides.running) return;
       slides.running = true;
       slides.run++;
+      setOverlayReady(false);
       if (slides.slots.length) { releaseSlot(0); releaseSlot(1); }
       slides.shown = -1;
       slides.history = [];
@@ -1281,6 +1337,7 @@
     board = load(STORAGE_BOARD);
     if (!boot.settings && board && board.data.settings) settings = board.data.settings;
     applyTheme();
+    applyBackground();
     tick();
     trigger('start');
     setInterval(function () { trigger('check'); }, VIEW_CHECK_MS);
