@@ -226,7 +226,7 @@
     outline: none;
   }
   .nav:active { background: rgba(0, 0, 0, 0.55); color: #fff; }
-  .nav.busy { animation: nav-pulse 0.8s ease-in-out infinite; }
+  .nav.busy { animation: nav-pulse 0.5s ease-in-out 2; }
   @keyframes nav-pulse {
     0%, 100% { background: rgba(0, 0, 0, 0.25); }
     50% { background: rgba(255, 255, 255, 0.3); }
@@ -1049,13 +1049,26 @@
       }
     }
 
+    // Back from the first photo in the history: put a random other photo in front of it,
+    // so back always works and next then returns to where you were.
+    function prependPhoto() {
+      var current = slides.history[slides.cursor];
+      var others = slides.ids.filter(function (id) { return id !== current; });
+      if (!others.length) return false;
+      slides.history.unshift(others[Math.floor(Math.random() * others.length)]);
+      slides.cursor++;
+      if (slides.nextIndex >= 0) slides.nextIndex++;
+      return true;
+    }
+
     // Arrow buttons: step = -1 (previous) or +1 (next).
     function navigate(step) {
       if (!slides.running || slides.shown === -1) return;
       // Ignore taps during a crossfade: the fading photo still holds the other slot.
       if (Date.now() - slides.lastSwapAt < slides.lastFadeMs + 200) return;
       var target = slides.cursor + step;
-      if (target < 0) return; // Nothing earlier in the history.
+      if (target < 0 && !prependPhoto()) return;
+      if (target < 0) target = 0;
       if (step > 0 && slides.nextReady && slides.nextIndex === target) {
         swapSlides(true);
         return;
