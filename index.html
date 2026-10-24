@@ -208,6 +208,7 @@
     transition: opacity 1.5s ease;
   }
   .slide.show { opacity: 1; }
+  .slide.quick { transition-duration: 0.3s; }
   .slide.fit-cover { object-fit: cover; }
   .slide.fit-contain { object-fit: contain; }
   .nav {
@@ -225,6 +226,11 @@
     outline: none;
   }
   .nav:active { background: rgba(0, 0, 0, 0.55); color: #fff; }
+  .nav.busy { animation: nav-pulse 0.8s ease-in-out infinite; }
+  @keyframes nav-pulse {
+    0%, 100% { background: rgba(0, 0, 0, 0.25); }
+    50% { background: rgba(255, 255, 255, 0.3); }
+  }
   .nav-prev { left: 1.5rem; }
   .nav-next { right: 1.5rem; }
   .nav svg {
@@ -331,6 +337,8 @@
     var VIEW_CHECK_MS = 5000;
     var NIGHT_PEEK_MS = 30 * 1000;
     var FADE_MS = 1500;
+    var QUICK_FADE_MS = 300; // Crossfade after an arrow press.
+    var PHOTO_BLOB_CACHE = 4; // Recent photos kept compressed, so back/forward needs no download.
     var PHOTO_LIST_MAX_AGE_MS = 30 * 60 * 1000;
     var PHOTO_RETRY_MS = 5000;
     var PHOTO_HISTORY_MAX = 50;
@@ -816,7 +824,7 @@
     // run counts start/stop cycles; callbacks from an earlier run see a different value and bail out.
     var slides = { running: false, run: 0, ids: [], order: [], pos: 0, listedAt: 0, shown: -1,
       nextReady: false, failures: 0, swapTimer: null, retryTimer: null, slots: [],
-      history: [], cursor: -1, nextIndex: -1, load: 0, lastSwapAt: 0 };
+      history: [], cursor: -1, nextIndex: -1, load: 0, lastSwapAt: 0, lastFadeMs: FADE_MS, blobs: [] };
 
     function isCurrentRun(run) { return slides.running && slides.run === run; }
 
@@ -865,11 +873,24 @@
       s.url = null;
     }
 
-    function base64ToObjectUrl(base64, mime) {
+    function base64ToBlob(base64, mime) {
       var bin = window.atob(base64);
       var bytes = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      return URL.createObjectURL(new Blob([bytes], { type: mime }));
+      return new Blob([bytes], { type: mime });
+    }
+
+    // Small most-recent-first cache of compressed photos. Only the two <img> slots hold decoded images.
+    function cachedBlob(id) {
+      for (var i = 0; i < slides.blobs.length; i++) {
+        if (slides.blobs[i].id === id) return slides.blobs[i].blob;
+      }
+      return null;
+    }
+
+    function rememberBlob(id, blob) {
+      slides.blobs = [{ id: id, blob: blob }].concat(slides.blobs.filter(function (b) { return b.id !== id; }))
+        .slice(0, PHOTO_BLOB_CACHE);
     }
 
     function shuffle(list) {
@@ -923,11 +944,12 @@
         }
         var index = wantIndex === null ? upcomingIndex() : wantIndex;
         var id = slides.history[index];
-        serverCall('photo', { id: id }, 'getPhoto', function (data) {
+        function show(blob) {
           if (!current()) return;
+          rememberBlob(id, blob);
           releaseSlot(i);
           var s = slot(i);
-          s.url = base64ToObjectUrl(data.base64, data.mime);
+          s.url = URL.createObjectURL(blob);
           s.img.onload = function () {
             s.img.onload = s.img.onerror = null;
             if (!current()) return;
@@ -941,6 +963,11 @@
             done(false, index);
           };
           s.img.src = s.url;
+        }
+        var cached = cachedBlob(id);
+        if (cached) return show(cached);
+        serverCall('photo', { id: id }, 'getPhoto', function (data) {
+          show(base64ToBlob(data.base64, data.mime));
         }, function (err) {
           if (!current()) return;
           slides.lastError = 'Photo ' + id + ': ' + (err || 'network error');
@@ -971,7 +998,7 @@
       });
     }
 
-    function swapSlides() {
+    function swapSlides(quick) {
       clearTimeout(slides.swapTimer);
       if (!slides.running) return;
       if (!slides.nextReady) {
@@ -980,13 +1007,20 @@
       }
       var hidden = slides.shown === 0 ? 1 : 0;
       var old = slides.shown;
+      var fadeMs = quick === true ? QUICK_FADE_MS : FADE_MS;
+      setQuick(slot(hidden).img, quick === true);
       slot(hidden).img.className += ' show';
-      if (old !== -1) slot(old).img.className = slot(old).img.className.replace(/\s*\bshow\b/, '');
+      if (old !== -1) {
+        setQuick(slot(old).img, quick === true);
+        slot(old).img.className = slot(old).img.className.replace(/\s*\bshow\b/, '');
+      }
+      setNavBusy(null);
       slides.shown = hidden;
       slides.cursor = slides.nextIndex;
       slides.nextIndex = -1;
       slides.nextReady = false;
       slides.lastSwapAt = Date.now();
+      slides.lastFadeMs = fadeMs;
       if (slides.history.length > PHOTO_HISTORY_MAX) {
         var drop = slides.history.length - PHOTO_HISTORY_MAX;
         slides.history.splice(0, drop);
@@ -998,21 +1032,35 @@
         if (!isCurrentRun(run)) return;
         if (old !== -1) releaseSlot(old);
         preloadHidden();
-      }, FADE_MS + 100);
+      }, fadeMs + 100);
       slides.swapTimer = setTimeout(swapSlides, (settings.photo_seconds || 30) * 1000);
+    }
+
+    function setQuick(img, quick) {
+      img.className = img.className.replace(/\s*\bquick\b/, '') + (quick ? ' quick' : '');
+    }
+
+    // Pulses the pressed arrow while its photo loads.
+    function setNavBusy(id) {
+      var ids = ['nav-prev', 'nav-next'];
+      for (var i = 0; i < ids.length; i++) {
+        var el = $(ids[i]);
+        el.className = el.className.replace(/\s*\bbusy\b/, '') + (ids[i] === id ? ' busy' : '');
+      }
     }
 
     // Arrow buttons: step = -1 (previous) or +1 (next).
     function navigate(step) {
       if (!slides.running || slides.shown === -1) return;
       // Ignore taps during a crossfade: the fading photo still holds the other slot.
-      if (Date.now() - slides.lastSwapAt < FADE_MS + 200) return;
+      if (Date.now() - slides.lastSwapAt < slides.lastFadeMs + 200) return;
       var target = slides.cursor + step;
       if (target < 0) return; // Nothing earlier in the history.
       if (step > 0 && slides.nextReady && slides.nextIndex === target) {
-        swapSlides();
+        swapSlides(true);
         return;
       }
+      setNavBusy(step > 0 ? 'nav-next' : 'nav-prev');
       clearTimeout(slides.swapTimer);
       clearTimeout(slides.retryTimer);
       var run = slides.run;
@@ -1023,8 +1071,9 @@
         if (ok) {
           slides.nextIndex = index;
           slides.nextReady = true;
-          swapSlides();
+          swapSlides(true);
         } else {
+          setNavBusy(null);
           renderSlideNote();
           preloadHidden();
           slides.swapTimer = setTimeout(swapSlides, (settings.photo_seconds || 30) * 1000);
