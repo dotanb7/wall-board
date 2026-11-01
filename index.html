@@ -609,10 +609,45 @@
         'current=temperature_2m,apparent_temperature,weather_code,is_day',
         'hourly=temperature_2m,precipitation_probability,weather_code,is_day',
         'daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset',
-        'forecast_days=5'
+        'forecast_days=5',
+        'models=' + weatherModels().join(',')
       ];
       if (settings.units === 'imperial') params.push('temperature_unit=fahrenheit');
       return 'https://api.open-meteo.com/v1/forecast?' + params.join('&');
+    }
+
+    // [main, rain]: temperatures and conditions from the first, the rain chance from the second.
+    // One model if both are the same.
+    function weatherModels() {
+      var main = settings.weather_model || 'best_match';
+      var rain = settings.rain_model || main;
+      return rain === main ? [main] : [main, rain];
+    }
+
+    // With two models Open-Meteo suffixes every series with the model name (temperature_2m_ecmwf_ifs);
+    // "current" comes unsuffixed from the first. Folds them back into plain names: each value from the
+    // preferred model, or the other one where the preferred has none (beyond its range or not offered).
+    function mergeModels(data, models) {
+      if (models.length < 2) return data;
+      function fold(block) {
+        var out = { time: block.time };
+        for (var key in block) {
+          for (var m = 0; m < models.length; m++) {
+            var suffix = '_' + models[m];
+            if (key.slice(-suffix.length) !== suffix) continue;
+            var base = key.slice(0, -suffix.length);
+            if (out[base]) continue;
+            var order = /^precipitation_probability/.test(base) ? [models[1], models[0]] : models;
+            var first = block[base + '_' + order[0]] || [], second = block[base + '_' + order[1]] || [];
+            out[base] = [];
+            for (var i = 0; i < block.time.length; i++) {
+              out[base].push(first[i] !== null && first[i] !== undefined ? first[i] : second[i] === undefined ? null : second[i]);
+            }
+          }
+        }
+        return out;
+      }
+      return { current: data.current, hourly: fold(data.hourly), daily: fold(data.daily) };
     }
 
     function fetchWeather() {
@@ -625,7 +660,8 @@
         if (xhr.status === 200) {
           try { data = JSON.parse(xhr.responseText); } catch (e) {}
         }
-        if (data && data.current && data.hourly && data.daily) {
+        if (data && data.current && data.hourly && data.daily) data = mergeModels(data, weatherModels());
+        if (data && data.current && data.hourly && data.daily && data.current.temperature_2m !== null) {
           weather = { fetchedAt: Date.now(), data: data };
           lastWeatherError = false;
           save(STORAGE_WEATHER, weather);
@@ -862,7 +898,8 @@
     // Settings come from the config Sheet via the board, so Sheet edits apply without a reload.
     function applySettings(next) {
       var weatherChanged = next.lat !== settings.lat || next.lon !== settings.lon ||
-        next.units !== settings.units || next.timezone !== settings.timezone;
+        next.units !== settings.units || next.timezone !== settings.timezone ||
+        next.weather_model !== settings.weather_model || next.rain_model !== settings.rain_model;
       settings = next;
       applyTheme();
       applyBackground();
