@@ -180,7 +180,38 @@
     text-overflow: ellipsis;
   }
   .agenda-empty { font-size: var(--fs-l); color: var(--muted); }
-  .pane-left .status { text-align: left; }
+  .pane-left .status { text-align: left; margin-top: 0; }
+
+  /* Bottom of the left pane: the photos-off button, then the status notes. */
+  .board-foot {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+  }
+  .photos-off {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    margin-right: var(--sp-m);
+    padding: var(--sp-xs) var(--sp-m);
+    font: inherit;
+    font-size: var(--fs-xs);
+    color: var(--muted);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+  .photos-off svg {
+    width: var(--fs-s);
+    height: var(--fs-s);
+    margin-right: var(--sp-s);
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .photos-off.active { color: var(--accent); border-color: var(--accent); }
 
   /* ---------- Weather ---------- */
   .icon { display: block; }
@@ -206,12 +237,12 @@
   .now-meta { font-size: var(--fs-s); color: var(--muted); margin-top: var(--sp-xs); white-space: nowrap; }
 
   .hourly {
-    display: flex;
     margin-top: var(--sp-l);
     padding: var(--sp-m) 0;
     border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
   }
+  .hour-cols { display: flex; }
   .hour {
     flex: 1 1 0;
     text-align: center;
@@ -219,8 +250,35 @@
   }
   .hour-time { font-size: var(--fs-s); color: var(--muted); white-space: nowrap; }
   .hour .icon { width: var(--icon-m); height: var(--icon-m); margin: var(--sp-xs) auto; }
-  .hour-temp { font-size: var(--fs-s); }
   .hour-pop { font-size: var(--fs-xs); color: var(--rain); min-height: var(--sp-l); }
+
+  /* Temperature curve under the hourly columns: the line is a stretched SVG, the dots and labels
+     are HTML placed at the same percentages, so text and dots keep their size at any width. */
+  .hour-graph { position: relative; height: 5rem; margin-top: var(--sp-s); }
+  .hour-graph svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
+  .hour-graph path {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 0.25rem;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+  .graph-dot {
+    position: absolute;
+    width: 0.7rem;
+    height: 0.7rem;
+    margin: -0.35rem 0 0 -0.35rem;
+    border-radius: 50%;
+    background: var(--text);
+  }
+  .graph-temp {
+    position: absolute;
+    margin-top: -0.6rem;
+    font-size: var(--fs-s);
+    white-space: nowrap;
+    -webkit-transform: translate(-50%, -100%);
+    transform: translate(-50%, -100%);
+  }
 
   .daily { margin-top: var(--sp-s); }
   .day {
@@ -374,7 +432,10 @@
         <div class="clock" id="clock">--:--</div>
         <div class="date" id="date"></div>
         <div class="agenda" id="agenda"></div>
-        <div class="status" id="board-status"></div>
+        <div class="board-foot">
+          <button class="photos-off" id="photos-off"></button>
+          <div class="status" id="board-status"></div>
+        </div>
       </section>
       <section class="pane pane-right">
         <div class="now" id="now"></div>
@@ -439,6 +500,8 @@
     var PHOTO_RETRY_MS = 5000;
     var PHOTO_HISTORY_MAX = 50;
     var CONTROLS_AWAKE_MS = 5000; // Controls stay bright this long after the last press.
+    var PHOTOS_OFF_MS = 20 * 60 * 1000; // The board's "photos off" button.
+    var STORAGE_PHOTOS_OFF = 'wib.photosOff.v1';
 
     var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     var DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -727,17 +790,17 @@
           '<div class="now-meta">Sunrise ' + hhmm(day.sunrise[t]) + ' &middot; Sunset ' + hhmm(day.sunset[t]) + '</div>' +
         '</div>';
 
-      var html = '';
+      var html = '', temps = [];
       var start = currentHourIndex(h.time, c.time) + 1;
       for (var i = start; start > 0 && i < start + 12 && i < h.time.length; i++) {
         html += '<div class="hour">' +
           '<div class="hour-time">' + h.time[i].slice(11, 13) + '</div>' +
           iconSvg(h.weather_code[i], h.is_day[i]) +
-          '<div class="hour-temp">' + deg(h.temperature_2m[i]) + '</div>' +
           '<div class="hour-pop">' + pop(h.precipitation_probability[i]) + '</div>' +
           '</div>';
+        temps.push(h.temperature_2m[i]);
       }
-      $('hourly').innerHTML = html;
+      $('hourly').innerHTML = html ? '<div class="hour-cols">' + html + '</div>' + tempGraph(temps) : '';
 
       html = '';
       for (var j = t; j < t + 5 && j < day.time.length; j++) {
@@ -752,6 +815,46 @@
           '</div>';
       }
       $('daily').innerHTML = html;
+    }
+
+    // A smooth line through the hourly temperatures, one point per column, with the value above
+    // each point. Coordinates are percentages of the graph box; the warmest hour sits highest.
+    // Plots the rounded values the labels show, and spreads at least GRAPH_MIN_SPAN degrees over
+    // the full height, so a 1-degree change is a small step rather than a cliff.
+    var GRAPH_MIN_SPAN = 4;
+    function tempGraph(temps) {
+      var n = temps.length, i, rounded = [];
+      for (i = 0; i < n; i++) rounded.push(Math.round(temps[i]));
+      var min = Math.min.apply(null, rounded), max = Math.max.apply(null, rounded);
+      var span = Math.max(max - min, GRAPH_MIN_SPAN), mid = (max + min) / 2;
+      var xs = [], ys = [];
+      for (i = 0; i < n; i++) {
+        xs.push((i + 0.5) / n * 100);
+        // Room above for the labels: points between 45% (warmest) and 90% (coldest).
+        ys.push(67.5 + (mid - rounded[i]) / span * 45);
+      }
+      // Slope at each point; flat at the ends and at peaks and dips, so the line never overshoots.
+      var slopes = [];
+      for (i = 0; i < n; i++) {
+        var flat = i === 0 || i === n - 1 || (ys[i] - ys[i - 1]) * (ys[i + 1] - ys[i]) <= 0;
+        slopes.push(flat ? 0 : (ys[i + 1] - ys[i - 1]) / 2);
+      }
+      var f = function (v) { return v.toFixed(2); };
+      var d = 'M0,' + f(ys[0]) + 'L' + f(xs[0]) + ',' + f(ys[0]);
+      for (i = 0; i < n - 1; i++) {
+        var third = (xs[i + 1] - xs[i]) / 3;
+        d += 'C' + f(xs[i] + third) + ',' + f(ys[i] + slopes[i] / 3) + ' ' +
+          f(xs[i + 1] - third) + ',' + f(ys[i + 1] - slopes[i + 1] / 3) + ' ' + f(xs[i + 1]) + ',' + f(ys[i + 1]);
+      }
+      d += 'L100,' + f(ys[n - 1]);
+      var html = '<div class="hour-graph"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">' +
+        '<path d="' + d + '"/></svg>';
+      for (i = 0; i < n; i++) {
+        var at = 'left:' + f(xs[i]) + '%;top:' + f(ys[i]) + '%';
+        html += '<span class="graph-dot" style="' + at + '"></span>' +
+          '<span class="graph-temp" style="' + at + '">' + deg(temps[i]) + '</span>';
+      }
+      return html + '</div>';
     }
 
     function ago(ms) {
@@ -1381,6 +1484,10 @@
         stateReason = 'morning window ' + settings.morning_board;
         return 'board';
       }
+      if (Date.now() < photosOffUntil) {
+        stateReason = 'photos off until ' + hhmmAt(photosOffUntil);
+        return 'board';
+      }
       if (!settings.has_photos) {
         stateReason = settings.lat === undefined ? 'no settings yet' : 'no photos (folder empty, unreadable or not set)';
         return 'board';
@@ -1419,9 +1526,38 @@
       viewState = next;
     }
 
+    // ---------- Photos off ----------
+    // The board's button keeps the slideshow away for PHOTOS_OFF_MS; pressed again, it resumes.
+    // Kept in localStorage so a reload doesn't cancel it.
+
+    var photosOffUntil = +load(STORAGE_PHOTOS_OFF) || 0;
+    var photosOffLabel = null;
+
+    function hhmmAt(ms) { var t = new Date(ms); return pad(t.getHours()) + ':' + pad(t.getMinutes()); }
+
+    function renderPhotosOff() {
+      var on = Date.now() < photosOffUntil;
+      var label = !settings.has_photos && !on ? '' : on ? 'Photos off until ' + hhmmAt(photosOffUntil) + ' &middot; resume' : 'Photos off 20 min';
+      if (label === photosOffLabel) return;
+      photosOffLabel = label;
+      var el = $('photos-off');
+      el.style.display = label ? '' : 'none';
+      el.className = 'photos-off' + (on ? ' active' : '');
+      el.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/>' +
+        '<polyline points="3,16 9,11 13,14 16,12 21,16"/>' + (on ? '<line x1="3" y1="3" x2="21" y2="21"/>' : '') + '</svg>' +
+        '<span>' + label + '</span>';
+    }
+
+    function togglePhotosOff() {
+      photosOffUntil = Date.now() < photosOffUntil ? 0 : Date.now() + PHOTOS_OFF_MS;
+      save(STORAGE_PHOTOS_OFF, photosOffUntil);
+      trigger('presence');
+    }
+
     function trigger(eventName) {
       if (eventName === 'presence') lastPresence = Date.now();
       setState(decideState(new Date()));
+      renderPhotosOff();
       renderSlideNote();
       renderDebug();
     }
@@ -1453,6 +1589,7 @@
     $('nav-prev').addEventListener('click', function () { wakeControls(); navigate(-1); });
     $('nav-next').addEventListener('click', function () { wakeControls(); navigate(1); });
     $('nav-pause').addEventListener('click', function () { wakeControls(); togglePause(); });
+    $('photos-off').addEventListener('click', togglePhotosOff);
     document.addEventListener('touchstart', onTap, true);
     document.addEventListener('mousedown', onTap, true);
     fetchWeather();
