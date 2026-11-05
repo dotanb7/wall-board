@@ -560,8 +560,9 @@
 
     // ---------- Icons (inline SVG, WMO weather codes) ----------
 
-    var CLOUD = 'M20 46h26a10 10 0 0 0 0-20a14 14 0 0 0-27-3a11 11 0 0 0 1 23z';
-    var CLOUD_HIGH = 'M20 38h26a10 10 0 0 0 0-20a14 14 0 0 0-27-3a11 11 0 0 0 1 23z';
+    // Every cloud sits at the same height, with room below for rain, snow or lightning, so a row of
+    // hours lines up whatever the weather. Sun and moon peek out behind its right shoulder.
+    var CLOUD = 'M20 38h26a10 10 0 0 0 0-20a14 14 0 0 0-27-3a11 11 0 0 0 1 23z';
     var MOON = 'M38 10a20 20 0 1 0 16 30a16 16 0 1 1-16-30z';
 
     function sunShape(cx, cy, r, ray) {
@@ -588,16 +589,16 @@
     var ICONS = {
       clearDay: sunShape(32, 32, 11, 7),
       clearNight: '<path d="' + MOON + '"/>',
-      partlyDay: '<g transform="translate(-6 -6) scale(0.8)">' + sunShape(32, 32, 10, 6) + '</g>' + cloud(CLOUD),
-      partlyNight: '<g transform="translate(-4 -6) scale(0.6)"><path d="' + MOON + '"/></g>' + cloud(CLOUD),
+      partlyDay: '<g transform="translate(29 -4) scale(0.6)">' + sunShape(32, 32, 10, 6) + '</g>' + cloud(CLOUD),
+      partlyNight: '<g transform="translate(32 -2) scale(0.5)"><path d="' + MOON + '"/></g>' + cloud(CLOUD),
       cloudy: cloud(CLOUD),
       fog: lines([[12, 26, 52, 26], [8, 36, 48, 36], [16, 46, 56, 46]], 'fog'),
-      drizzle: cloud(CLOUD_HIGH) + lines([[24, 46, 23, 49], [34, 46, 33, 49], [44, 46, 43, 49],
+      drizzle: cloud(CLOUD) + lines([[24, 46, 23, 49], [34, 46, 33, 49], [44, 46, 43, 49],
         [29, 54, 28, 57], [39, 54, 38, 57]], 'drop'),
-      rain: cloud(CLOUD_HIGH) + lines([[24, 44, 20, 54], [34, 44, 30, 54], [44, 44, 40, 54]], 'drop'),
-      snow: cloud(CLOUD_HIGH) + lines([[24, 45, 24, 53], [20, 49, 28, 49], [40, 45, 40, 53],
+      rain: cloud(CLOUD) + lines([[24, 44, 20, 54], [34, 44, 30, 54], [44, 44, 40, 54]], 'drop'),
+      snow: cloud(CLOUD) + lines([[24, 45, 24, 53], [20, 49, 28, 49], [40, 45, 40, 53],
         [36, 49, 44, 49], [32, 54, 32, 62], [28, 58, 36, 58]], 'snow'),
-      thunder: cloud(CLOUD_HIGH) + '<polyline class="sun" points="34,40 27,50 35,50 29,61"/>'
+      thunder: cloud(CLOUD) + '<polyline class="sun" points="34,40 27,50 35,50 29,61"/>'
     };
 
     var CODES = [
