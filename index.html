@@ -444,6 +444,40 @@
     color: #1c1c1c;
   }
 
+  /* Weather time at the bottom right; tapping it opens the stats panel. */
+  .weather-status { display: flex; align-items: center; justify-content: flex-end; }
+  .info-icon {
+    width: var(--fs-s);
+    height: var(--fs-s);
+    margin-left: var(--sp-s);
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+  .stats {
+    display: none;
+    position: fixed;
+    right: var(--sp-l);
+    bottom: var(--sp-l);
+    z-index: 5;
+    min-width: 40%;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: var(--sp-m) var(--sp-l);
+    font-size: var(--fs-s);
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+  }
+  .stats.open { display: block; }
+  .stats-head { margin-top: var(--sp-s); color: var(--muted); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.08em; }
+  .stats-row { display: flex; justify-content: space-between; }
+  .stats-label { margin-right: var(--sp-l); }
+  .stats-value { text-align: right; font-variant-numeric: tabular-nums; }
+  .stats-hint { margin-top: var(--sp-m); color: var(--muted); font-size: var(--fs-xs); }
+
   .debug {
     position: fixed;
     left: 0; right: 0; bottom: 0;
@@ -498,10 +532,11 @@
       </div>
     </div>
     <div class="debug" id="debug"></div>
+    <div class="stats" id="stats"></div>
     <div class="overlay" id="night">
       <div class="night-clock" id="night-clock"></div>
     </div>
-    <script>var BOOT = null; var PAGE_VERSION = "41f9d4bde90a";</script>
+    <script>var BOOT = null; var PAGE_VERSION = "e2caefbc871b";</script>
     <script>
   // Plain ES5 on purpose: the tablet runs an older Android WebView.
   (function () {
@@ -938,17 +973,24 @@
       return Math.round(hours / 24) + ' days ago';
     }
 
+    var INFO_ICON = '<svg class="info-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 11v6M12 7.5v.5"/></svg>';
+
+    // Always shows when the weather was fetched; tap it for the stats panel.
     function renderWeatherStatus() {
       var el = $('weather-status');
+      var text;
+      var warn = false;
       if (!weather) {
-        el.className = 'status' + (lastWeatherError ? ' status-warn' : '');
-        el.textContent = lastWeatherError ? 'Weather unavailable' : 'Loading weather';
-        return;
+        warn = lastWeatherError;
+        text = lastWeatherError ? 'Weather unavailable' : 'Loading weather';
+      } else {
+        var age = Date.now() - weather.fetchedAt;
+        warn = lastWeatherError || age > WEATHER_STALE_MS;
+        text = warn ? 'Weather updated ' + ago(age) : 'Weather ' + hhmmAt(weather.fetchedAt);
       }
-      var age = Date.now() - weather.fetchedAt;
-      var stale = lastWeatherError || age > WEATHER_STALE_MS;
-      el.className = 'status' + (stale ? ' status-warn' : '');
-      el.textContent = stale ? 'Weather updated ' + ago(age) : '';
+      var html = escapeHtml(text) + INFO_ICON;
+      el.className = 'status weather-status' + (warn ? ' status-warn' : '');
+      if (el.innerHTML !== html) el.innerHTML = html;
     }
 
     // ---------- Calendar ----------
@@ -1620,6 +1662,56 @@
         ' s, night ' + (settings.night_hours || 'off') + ', morning ' + (settings.morning_board || 'off');
     }
 
+    // ---------- Stats panel: what was fetched when, opened from the weather time ----------
+
+    var STATS_OPEN_MS = 60 * 1000;
+    var statsTimer = null;
+    var pageLoadedAt = Date.now();
+
+    function when(ms) { return ms ? hhmmAt(ms) + ' (' + ago(Date.now() - ms) + ')' : 'never'; }
+    function statsRow(label, value, warn) {
+      return '<div class="stats-row' + (warn ? ' status-warn' : '') + '"><span class="stats-label">' + escapeHtml(label) +
+        '</span><span class="stats-value">' + escapeHtml(value) + '</span></div>';
+    }
+
+    function renderStats() {
+      var html = '<div class="stats-head">Weather</div>';
+      html += statsRow('Updated', weather ? when(weather.fetchedAt) : 'never', lastWeatherError);
+      if (lastWeatherError) html += statsRow('Last try', 'failed; retrying', true);
+      html += statsRow('Refresh', 'every ' + Math.round(WEATHER_REFRESH_MS / 60000) + ' min');
+      var models = weatherModels();
+      html += statsRow('Model', models[0] + (models[1] ? ', rain chance ' + models[1] : ''));
+      if (settings.lat !== undefined) html += statsRow('Location', settings.lat + ', ' + settings.lon);
+      html += '<div class="stats-head">Calendar</div>';
+      html += statsRow('Board data', board ? when(board.fetchedAt) : 'never', lastBoardError);
+      var sources = board ? board.data.sources : [];
+      for (var i = 0; i < sources.length; i++) {
+        var src = sources[i];
+        var last = src.lastSuccess ? Date.parse(src.lastSuccess) : 0;
+        html += statsRow(src.name, (src.ok ? '' : (src.error || 'not updating') + ' \u00b7 last ') + (last ? when(last) : src.ok ? 'ok' : 'never'), !src.ok);
+      }
+      html += '<div class="stats-head">Photos</div>';
+      html += statsRow('Listed', slides.ids.length + (slides.listedAt ? ' at ' + hhmmAt(slides.listedAt) : ''));
+      if (Date.now() < photosOffUntil) html += statsRow('Off until', hhmmAt(photosOffUntil));
+      if (slides.lastError) html += statsRow('Last error', slides.lastError, true);
+      html += '<div class="stats-head">Page</div>';
+      html += statsRow('Version', pageVersion || 'live');
+      html += statsRow('Loaded', when(pageLoadedAt));
+      html += '<div class="stats-hint">Tap to close \u00b7 hold the clock 2 s to reload</div>';
+      $('stats').innerHTML = html;
+    }
+
+    function openStats() {
+      renderStats();
+      $('stats').className = 'stats open';
+      clearTimeout(statsTimer);
+      statsTimer = setTimeout(closeStats, STATS_OPEN_MS);
+    }
+    function closeStats() {
+      clearTimeout(statsTimer);
+      $('stats').className = 'stats';
+    }
+
     function setState(next) {
       if (next === viewState) return;
       var cls = document.body.className.replace(/\bstate-\w+\b/g, '').replace(/\s+/g, ' ');
@@ -1695,6 +1787,8 @@
     $('nav-next').addEventListener('click', function () { wakeControls(); navigate(1); });
     $('nav-pause').addEventListener('click', function () { wakeControls(); togglePause(); });
     $('photos-off').addEventListener('click', togglePhotosOff);
+    $('weather-status').addEventListener('click', openStats);
+    $('stats').addEventListener('click', closeStats);
     $('agenda').addEventListener('scroll', updateAgendaFade);
     $('clock').addEventListener('touchstart', startHold);
     $('clock').addEventListener('mousedown', startHold);
