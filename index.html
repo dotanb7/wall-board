@@ -98,6 +98,11 @@
     -webkit-user-select: none;
     user-select: none;
   }
+  /* One extra pixel below the screen, and the page kept scrolled onto it (keepPageNudged), so
+     WallPanel's pull-to-refresh sees a page that can still scroll up and leaves downward swipes
+     to the agenda. */
+  html { height: calc(100vh + 1px); }
+  body { height: 100vh; }
   * { box-sizing: border-box; }
   .muted { color: var(--muted); }
 
@@ -160,6 +165,7 @@
     overflow-x: hidden;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain; /* A swipe past either end stays in the list. */
     scrollbar-width: none;
     margin-top: var(--sp-l);
   }
@@ -494,7 +500,7 @@
     <div class="overlay" id="night">
       <div class="night-clock" id="night-clock"></div>
     </div>
-    <script>var BOOT = null; var PAGE_VERSION = "7253999ad0e5";</script>
+    <script>var BOOT = null; var PAGE_VERSION = "a16244172c69";</script>
     <script>
   // Plain ES5 on purpose: the tablet runs an older Android WebView.
   (function () {
@@ -1052,6 +1058,12 @@
       var el = $('agenda');
       var below = el.scrollHeight - el.scrollTop - el.clientHeight > 1;
       el.className = 'agenda' + (below ? ' more-below' : '');
+    }
+
+    // See html in styles: keeps the page 1 px down so pull-to-refresh never takes the agenda's swipes.
+    function keepPageNudged() {
+      if (!isStatic || !window.scrollTo) return;
+      if (!(window.pageYOffset >= 1)) window.scrollTo(0, 1);
     }
 
     function resetAgendaScroll() {
@@ -1649,6 +1661,7 @@
       setState(decideState(new Date()));
       renderPhotosOff();
       resetAgendaScroll();
+      keepPageNudged();
       renderSlideNote();
       renderDebug();
     }
@@ -1689,7 +1702,10 @@
     $('clock').addEventListener('mouseup', endHold);
     $('clock').addEventListener('mouseleave', endHold);
     setInterval(checkVersion, VERSION_CHECK_MS);
-    if (window.addEventListener) window.addEventListener('resize', updateAgendaFade);
+    if (window.addEventListener) {
+      window.addEventListener('resize', updateAgendaFade);
+      window.addEventListener('scroll', keepPageNudged);
+    }
     document.addEventListener('touchstart', onTap, true);
     document.addEventListener('mousedown', onTap, true);
     fetchWeather();
