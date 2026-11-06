@@ -187,9 +187,10 @@
     display: flex;
     align-items: baseline;
     font-size: var(--fs-l);
-    padding: var(--sp-xs) var(--sp-s) var(--sp-xs) var(--sp-m);
+    padding: var(--sp-xs) var(--sp-s) var(--sp-xs) calc(var(--sp-m) + var(--event-bar));
     margin-bottom: var(--sp-xs);
-    border-left: var(--event-bar) solid var(--muted);
+    /* The color bar is an inset shadow, not a border: rounded outside, straight edge inside. */
+    box-shadow: inset var(--event-bar) 0 0 var(--muted);
     border-radius: var(--radius-m);
     background: var(--card);
     white-space: nowrap;
@@ -500,7 +501,7 @@
     <div class="overlay" id="night">
       <div class="night-clock" id="night-clock"></div>
     </div>
-    <script>var BOOT = null; var PAGE_VERSION = "a16244172c69";</script>
+    <script>var BOOT = null; var PAGE_VERSION = "41f9d4bde90a";</script>
     <script>
   // Plain ES5 on purpose: the tablet runs an older Android WebView.
   (function () {
@@ -1009,7 +1010,7 @@
       else if (!item.continued) time = e.start.slice(11, 16);
       else time = e.end.slice(0, 10) === dayKeyShown ? 'until ' + e.end.slice(11, 16) : '';
       return '<div class="event' + (e.allDay ? ' event-all-day' : '') +
-        '" style="border-left-color:' + safeColor(e.color) + '">' +
+        '" style="box-shadow:inset var(--event-bar) 0 0 ' + safeColor(e.color) + '">' +
         (e.allDay ? '' : '<span class="event-time">' + time + '</span>') +
         // dir="auto": Hebrew (or any right-to-left) titles lay out and truncate on their own side.
         '<span class="event-title" dir="auto">' + escapeHtml(e.title) + '</span>' +
