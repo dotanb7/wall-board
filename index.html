@@ -138,6 +138,14 @@
     line-height: 1;
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
+    -webkit-transition: opacity 0.3s;
+    transition: opacity 0.3s;
+  }
+  /* Held down: fades over the 2 s it takes to reload, so the hold shows progress. */
+  .clock.holding {
+    opacity: 0.25;
+    -webkit-transition: opacity 2s linear;
+    transition: opacity 2s linear;
   }
   .date {
     margin-top: var(--sp-m);
@@ -486,7 +494,7 @@
     <div class="overlay" id="night">
       <div class="night-clock" id="night-clock"></div>
     </div>
-    <script>var BOOT = null;</script>
+    <script>var BOOT = null; var PAGE_VERSION = "7253999ad0e5";</script>
     <script>
   // Plain ES5 on purpose: the tablet runs an older Android WebView.
   (function () {
@@ -656,8 +664,15 @@
     function maybeDailyReload(now) {
       if (now.getHours() !== RELOAD_HOUR || now.getMinutes() !== 0) return;
       if (Date.now() - startedAt < MIN_UPTIME_BEFORE_RELOAD_MS) return;
+      reloadPage();
+    }
+
+    // version: a newly deployed page version, put in the query so no cache hands back the old one.
+    function reloadPage(version) {
       if (isStatic) {
-        window.location.reload();
+        var l = window.location;
+        if (version) l.replace(l.pathname + '?v=' + encodeURIComponent(version) + l.hash);
+        else l.reload();
         return;
       }
       // The page runs inside Apps Script's sandbox iframes; reload the top-level page when allowed.
@@ -679,6 +694,38 @@
       // Align the next tick to just after the minute boundary.
       var msToNextMinute = 60000 - (now.getSeconds() * 1000 + now.getMilliseconds());
       setTimeout(tick, msToNextMinute + 50);
+    }
+
+    // ---------- Updates ----------
+    // The static page reloads itself when a new version is deployed (version.json next to it).
+    // Holding the clock for RELOAD_HOLD_MS reloads by hand.
+
+    var pageVersion = typeof PAGE_VERSION === 'string' ? PAGE_VERSION : '';
+    var VERSION_CHECK_MS = 10 * 60 * 1000;
+    var RELOAD_HOLD_MS = 2000;
+    var holdTimer = null;
+
+    function checkVersion() {
+      if (!isStatic || !pageVersion) return;
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', 'version.json?t=' + Date.now());
+      xhr.timeout = 20000;
+      xhr.onload = function () {
+        var data = null;
+        try { data = JSON.parse(xhr.responseText); } catch (e) {}
+        if (xhr.status === 200 && data && data.version && data.version !== pageVersion) reloadPage(data.version);
+      };
+      xhr.send();
+    }
+
+    function startHold() {
+      clearTimeout(holdTimer);
+      $('clock').className = 'clock holding';
+      holdTimer = setTimeout(function () { reloadPage(); }, RELOAD_HOLD_MS);
+    }
+    function endHold() {
+      clearTimeout(holdTimer);
+      $('clock').className = 'clock';
     }
 
     // ---------- Weather ----------
@@ -1635,6 +1682,13 @@
     $('nav-pause').addEventListener('click', function () { wakeControls(); togglePause(); });
     $('photos-off').addEventListener('click', togglePhotosOff);
     $('agenda').addEventListener('scroll', updateAgendaFade);
+    $('clock').addEventListener('touchstart', startHold);
+    $('clock').addEventListener('mousedown', startHold);
+    $('clock').addEventListener('touchend', endHold);
+    $('clock').addEventListener('touchmove', endHold);
+    $('clock').addEventListener('mouseup', endHold);
+    $('clock').addEventListener('mouseleave', endHold);
+    setInterval(checkVersion, VERSION_CHECK_MS);
     if (window.addEventListener) window.addEventListener('resize', updateAgendaFade);
     document.addEventListener('touchstart', onTap, true);
     document.addEventListener('mousedown', onTap, true);
