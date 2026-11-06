@@ -185,6 +185,7 @@
     text-overflow: ellipsis;
   }
   .agenda-empty { font-size: var(--fs-l); color: var(--muted); }
+  .agenda-more { font-size: var(--fs-s); color: var(--muted); }
   .pane-left .status { text-align: left; margin-top: 0; }
 
   /* Bottom of the left pane: the photos-off button, then the status notes. */
@@ -976,6 +977,25 @@
         html += '</div>';
       }
       el.innerHTML = html;
+      fitAgenda(el);
+    }
+
+    // The agenda has the height left under the clock. Rather than clip a row in half, drops whole
+    // events from the end (and days left empty) until the rest fits, and says how many are hidden.
+    function fitAgenda(el) {
+      if (!(el.scrollHeight > el.clientHeight)) return;
+      var events = el.getElementsByClassName('event');
+      var more = document.createElement('div');
+      more.className = 'agenda-more';
+      el.appendChild(more);
+      var hidden = 0;
+      while (el.scrollHeight > el.clientHeight && events.length) {
+        var last = events[events.length - 1], day = last.parentNode;
+        day.removeChild(last);
+        if (!day.getElementsByClassName('event').length) day.parentNode.removeChild(day);
+        hidden++;
+        more.textContent = '+' + hidden + ' more';
+      }
     }
 
     function loadBoard() {
@@ -1596,6 +1616,7 @@
     $('nav-next').addEventListener('click', function () { wakeControls(); navigate(1); });
     $('nav-pause').addEventListener('click', function () { wakeControls(); togglePause(); });
     $('photos-off').addEventListener('click', togglePhotosOff);
+    if (window.addEventListener) window.addEventListener('resize', renderAgenda);
     document.addEventListener('touchstart', onTap, true);
     document.addEventListener('mousedown', onTap, true);
     fetchWeather();
