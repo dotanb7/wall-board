@@ -37,6 +37,9 @@
     --radius-m: 0.8rem;
     --radius-pill: 999px;
 
+    /* Height of the fade at the bottom of a scrollable list. */
+    --fade-below: 4rem;
+
     /* Event rows: color bar on the left, tinted bar behind. */
     --event-bar: 0.5rem;
 
@@ -142,11 +145,20 @@
     color: var(--muted);
   }
 
+  /* Scrolls by touch when the events don't fit; no scrollbar, a fade at the bottom instead. */
   .agenda {
     flex: 1 1 auto;
     min-height: 0;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
     margin-top: var(--sp-l);
+  }
+  .agenda::-webkit-scrollbar { display: none; }
+  .agenda.more-below {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade-below)), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade-below)), transparent);
   }
   .agenda-day { margin-bottom: var(--sp-m); }
   .agenda-heading {
@@ -185,11 +197,11 @@
     text-overflow: ellipsis;
   }
   .agenda-empty { font-size: var(--fs-l); color: var(--muted); }
-  .agenda-more { font-size: var(--fs-s); color: var(--muted); }
   .pane-left .status { text-align: left; margin-top: 0; }
 
   /* Bottom of the left pane: the photos-off button, then the status notes. */
   .board-foot {
+    flex: 0 0 auto; /* Never squeezed: the agenda above gives up the space instead. */
     margin-top: auto;
     display: flex;
     align-items: center;
@@ -976,25 +988,30 @@
         }
         html += '</div>';
       }
-      el.innerHTML = html;
-      fitAgenda(el);
+      // Redrawn every minute; only touch the DOM when something changed, so a scrolled list stays put.
+      if (html !== agendaHtml) {
+        agendaHtml = html;
+        el.innerHTML = html;
+      }
+      updateAgendaFade();
     }
 
-    // The agenda has the height left under the clock. Rather than clip a row in half, drops whole
-    // events from the end (and days left empty) until the rest fits, and says how many are hidden.
-    function fitAgenda(el) {
-      if (!(el.scrollHeight > el.clientHeight)) return;
-      var events = el.getElementsByClassName('event');
-      var more = document.createElement('div');
-      more.className = 'agenda-more';
-      el.appendChild(more);
-      var hidden = 0;
-      while (el.scrollHeight > el.clientHeight && events.length) {
-        var last = events[events.length - 1], day = last.parentNode;
-        day.removeChild(last);
-        if (!day.getElementsByClassName('event').length) day.parentNode.removeChild(day);
-        hidden++;
-        more.textContent = '+' + hidden + ' more';
+    // The agenda scrolls by touch when it doesn't fit. A fade at the bottom says there is more below;
+    // a minute without a touch scrolls it back to the top.
+    var agendaHtml = null;
+    var AGENDA_RESET_MS = 60 * 1000;
+
+    function updateAgendaFade() {
+      var el = $('agenda');
+      var below = el.scrollHeight - el.scrollTop - el.clientHeight > 1;
+      el.className = 'agenda' + (below ? ' more-below' : '');
+    }
+
+    function resetAgendaScroll() {
+      var el = $('agenda');
+      if (el.scrollTop > 0 && Date.now() - lastPresence > AGENDA_RESET_MS) {
+        el.scrollTop = 0;
+        updateAgendaFade();
       }
     }
 
@@ -1584,6 +1601,7 @@
       if (eventName === 'presence') lastPresence = Date.now();
       setState(decideState(new Date()));
       renderPhotosOff();
+      resetAgendaScroll();
       renderSlideNote();
       renderDebug();
     }
@@ -1616,7 +1634,8 @@
     $('nav-next').addEventListener('click', function () { wakeControls(); navigate(1); });
     $('nav-pause').addEventListener('click', function () { wakeControls(); togglePause(); });
     $('photos-off').addEventListener('click', togglePhotosOff);
-    if (window.addEventListener) window.addEventListener('resize', renderAgenda);
+    $('agenda').addEventListener('scroll', updateAgendaFade);
+    if (window.addEventListener) window.addEventListener('resize', updateAgendaFade);
     document.addEventListener('touchstart', onTap, true);
     document.addEventListener('mousedown', onTap, true);
     fetchWeather();
